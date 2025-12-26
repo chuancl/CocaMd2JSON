@@ -114,8 +114,8 @@ const App = () => {
 
   const openFullPage = () => {
     if (typeof chrome !== "undefined" && chrome.tabs) {
-      // In WXT/Extension environment
-      const url = chrome.runtime.getURL("entrypoints/popup/index.html");
+      // In WXT/Extension environment, the entrypoint 'entrypoints/popup/index.html' is built to 'popup.html'
+      const url = chrome.runtime.getURL("popup.html");
       chrome.tabs.create({ url });
     } else {
       // Fallback for dev environment or if chrome API is mocked
