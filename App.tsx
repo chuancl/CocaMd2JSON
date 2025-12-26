@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 declare var chrome: any;
 
@@ -17,9 +17,9 @@ interface ProcessedWord {
   phoneticUs: string;
   phoneticUk: string;
   partOfSpeech: string;
-  inflections: string[]; // Changed to array
-  tags: string[];        // Changed to array
-  cocaRank: number;      // Changed to number
+  inflections: string[]; 
+  tags: string[];        
+  cocaRank: number;      
   image: string;
   video: {
     cover: string;
@@ -97,17 +97,54 @@ const fetchWordData = async (word: string): Promise<any> => {
 const formatTranslation = (raw: string): string => {
   if (!raw) return "";
   try {
-    // Attempt to parse ["trans1", "trans2"] format
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Join multiple translations with a separator, or return single
       return parsed.join('；'); 
     }
     return String(parsed);
   } catch (e) {
-    // Fallback if not valid JSON: remove brackets and quotes
     return raw.replace(/^\[|\]$/g, '').replace(/"/g, '').trim();
   }
+};
+
+// --- Components ---
+
+const Icons = {
+  Upload: () => (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{color: '#6366f1'}}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+  ),
+  File: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="16" y1="13" x2="8" y2="13"/>
+      <line x1="16" y1="17" x2="8" y2="17"/>
+      <polyline points="10 9 9 9 8 9"/>
+    </svg>
+  ),
+  Download: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+  ),
+  Merge: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+    </svg>
+  ),
+  External: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+      <polyline points="15 3 21 3 21 9"/>
+      <line x1="10" y1="14" x2="21" y2="3"/>
+    </svg>
+  )
 };
 
 // --- Main Component ---
@@ -120,36 +157,52 @@ const App = () => {
   const [results, setResults] = useState<FileResult[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [splitCount, setSplitCount] = useState<number>(50);
+  const [dragActive, setDragActive] = useState(false);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Basic detection: if body width is constrained, it's likely a popup
     if (window.innerWidth > 600) {
       setIsPopup(false);
     }
   }, []);
 
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
+
   const openFullPage = () => {
     if (typeof chrome !== "undefined" && chrome.tabs) {
-      // In WXT/Extension environment, the entrypoint 'entrypoints/popup/index.html' is built to 'popup.html'
       const url = chrome.runtime.getURL("popup.html");
       chrome.tabs.create({ url });
     } else {
-      // Fallback for dev environment or if chrome API is mocked
       window.open(window.location.href, "_blank");
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement> | React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let selectedFiles: File[] = [];
+    
+    if ('files' in e.target && e.target.files) {
+        selectedFiles = Array.from(e.target.files);
+    } else if ('dataTransfer' in e && e.dataTransfer.files) {
+        selectedFiles = Array.from(e.dataTransfer.files);
+    }
+
+    if (selectedFiles.length > 0) {
+      setFiles(selectedFiles);
       setResults([]);
       setLogs([]);
       setProgress({ current: 0, total: 0, currentWord: "" });
+      setDragActive(false);
     }
   };
 
   const addLog = (msg: string) => {
-    setLogs((prev) => [msg, ...prev].slice(0, 100));
+    setLogs((prev) => [...prev, msg].slice(-200));
   };
 
   const processFiles = async () => {
@@ -160,6 +213,8 @@ const App = () => {
     const allResults: FileResult[] = [];
     let totalWords = 0;
     
+    addLog("开始解析文件...");
+
     const parsedFiles = await Promise.all(files.map(async (file) => {
       const text = await file.text();
       const words = parseMarkdownFile(text);
@@ -167,7 +222,7 @@ const App = () => {
       return { fileName: file.name, words };
     }));
 
-    setProgress({ current: 0, total: totalWords, currentWord: "Initializing..." });
+    setProgress({ current: 0, total: totalWords, currentWord: "初始化..." });
 
     const CONCURRENCY = 5;
     let globalProcessedCount = 0;
@@ -175,6 +230,7 @@ const App = () => {
     for (const fileObj of parsedFiles) {
       const fileProcessedWords: ProcessedWord[] = [];
       const words = fileObj.words;
+      addLog(`正在处理文件: ${fileObj.fileName} (共 ${words.length} 个单词)`);
 
       for (let i = 0; i < words.length; i += CONCURRENCY) {
         const chunk = words.slice(i, i + CONCURRENCY);
@@ -191,10 +247,9 @@ const App = () => {
                text: entry.word,
                translation: formatTranslation(def.trans),
                partOfSpeech: def.pos,
-               cocaRank: Number(entry.rank), // Converted to number
+               cocaRank: Number(entry.rank), 
                phoneticUs: getDeep(apiData, "ec.word[0].usphone"),
                phoneticUk: getDeep(apiData, "ec.word[0].ukphone"),
-               // Removed JSON.stringify to return actual arrays
                inflections: getDeep(apiData, "collins_primary.words.indexforms", []) || [], 
                tags: getDeep(apiData, "ec.exam_type", []) || [],
                image: getDeep(apiData, "pic_dict.pic[0].image"),
@@ -209,16 +264,15 @@ const App = () => {
 
            globalProcessedCount++;
            setProgress((p) => ({ ...p, current: globalProcessedCount }));
-           addLog(`Processed [${entry.word}]`);
         }));
       }
-      
+      addLog(`文件 ${fileObj.fileName} 处理完成。`);
       allResults.push({ fileName: fileObj.fileName, data: fileProcessedWords });
     }
 
     setResults(allResults);
     setProcessing(false);
-    addLog("All files processed successfully.");
+    addLog("所有文件处理完毕！");
   };
 
   const downloadJSON = (filename: string, data: any) => {
@@ -233,7 +287,6 @@ const App = () => {
             saveAs: false
         });
     } else {
-        // Fallback for non-extension environment
         const a = document.createElement('a');
         a.href = url;
         a.download = filename.endsWith('.json') ? filename : `${filename}.json`;
@@ -258,226 +311,236 @@ const App = () => {
     const allData = results.flatMap(r => r.data);
     for (let i = 0; i < allData.length; i += splitCount) {
       const chunk = allData.slice(i, i + splitCount);
-      downloadJSON(`vocabulary_batch_${(i / splitCount) + 1}`, chunk);
-    }
-  };
-
-  // --- Styles ---
-  
-  const styles: any = {
-    container: {
-      fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-      padding: "20px",
-      backgroundColor: "#f9f9f9",
-      minHeight: "100vh",
-      color: "#333",
-      boxSizing: "border-box",
-      width: isPopup ? "350px" : "100%", // Explicit width for popup
-    },
-    header: {
-      marginBottom: "20px",
-      borderBottom: "1px solid #ddd",
-      paddingBottom: "10px",
-    },
-    title: {
-      fontSize: "24px",
-      fontWeight: 600,
-      color: "#2c3e50",
-    },
-    dropZone: {
-      border: "2px dashed #3498db",
-      borderRadius: "8px",
-      padding: "40px",
-      textAlign: "center",
-      backgroundColor: "#fff",
-      cursor: "pointer",
-      marginBottom: "20px",
-      transition: "background 0.3s",
-    },
-    button: {
-      backgroundColor: "#3498db",
-      color: "white",
-      border: "none",
-      padding: "10px 20px",
-      borderRadius: "4px",
-      cursor: "pointer",
-      fontSize: "16px",
-      fontWeight: 500,
-      marginRight: "10px",
-    },
-    secondaryButton: {
-      backgroundColor: "#2ecc71",
-      color: "white",
-      border: "none",
-      padding: "8px 16px",
-      borderRadius: "4px",
-      cursor: "pointer",
-      fontSize: "14px",
-      marginTop: "10px",
-      marginRight: "10px",
-    },
-    progressContainer: {
-      marginTop: "20px",
-      backgroundColor: "#fff",
-      padding: "15px",
-      borderRadius: "8px",
-      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-    },
-    progressBar: {
-      height: "20px",
-      backgroundColor: "#ecf0f1",
-      borderRadius: "10px",
-      overflow: "hidden",
-      marginTop: "10px",
-    },
-    progressFill: (percent: number) => ({
-      height: "100%",
-      width: `${percent}%`,
-      backgroundColor: "#2ecc71",
-      transition: "width 0.3s ease",
-    }),
-    logArea: {
-      backgroundColor: "#2c3e50",
-      color: "#ecf0f1",
-      padding: "10px",
-      borderRadius: "4px",
-      height: "150px",
-      overflowY: "auto",
-      fontFamily: "monospace",
-      fontSize: "12px",
-      marginTop: "10px",
-    },
-    previewArea: {
-      marginTop: "20px",
-      backgroundColor: "#fff",
-      padding: "15px",
-      borderRadius: "8px",
-      border: "1px solid #ddd",
-    },
-    codeBlock: {
-      backgroundColor: "#f4f4f4",
-      padding: "10px",
-      borderRadius: "4px",
-      overflowX: "auto",
-      maxHeight: "300px",
-      fontSize: "12px",
-    },
-    input: {
-      padding: "8px",
-      borderRadius: "4px",
-      border: "1px solid #ccc",
-      width: "80px",
-      marginRight: "10px",
-    },
-    exportSection: {
-      display: "flex",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: "10px",
-      marginTop: "10px",
+      downloadJSON(`vocabulary_batch_${Math.floor(i / splitCount) + 1}`, chunk);
     }
   };
 
   // --- Render Popup View ---
   if (isPopup) {
     return (
-      <div style={styles.container}>
-        <h3 style={styles.title}>Vocabulary Processor</h3>
-        <p>Use the full dashboard for file processing.</p>
-        <button style={styles.button} onClick={openFullPage}>
-          Open Dashboard
+      <div className="popup-container">
+        <style>{`
+          body { margin: 0; background: #f8fafc; font-family: 'Segoe UI', sans-serif; }
+          .popup-container { padding: 24px; text-align: center; width: 300px; }
+          .popup-title { font-size: 20px; color: #1e293b; margin-bottom: 8px; font-weight: 600; }
+          .popup-text { color: #64748b; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+          .popup-btn { 
+            background: linear-gradient(135deg, #6366f1, #4f46e5); 
+            color: white; border: none; padding: 10px 20px; border-radius: 8px; 
+            cursor: pointer; font-weight: 500; width: 100%; transition: opacity 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+          }
+          .popup-btn:hover { opacity: 0.9; }
+        `}</style>
+        <h3 className="popup-title">单词本生成器</h3>
+        <p className="popup-text">Markdown 词汇表转 JSON 工具，支持有道词典数据自动填充。</p>
+        <button className="popup-btn" onClick={openFullPage}>
+          <Icons.External /> 打开完整面板
         </button>
       </div>
     );
   }
 
   // --- Render Dashboard View ---
-  const percent = progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
+  const percent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>Vocabulary JSON Generator</h1>
-        <p>Parse markdown vocabulary lists, enrich with Youdao API, and export to JSON.</p>
-      </header>
+    <div className="dashboard-container">
+       <style>{`
+          body { margin: 0; background: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+          .dashboard-container { max-width: 900px; margin: 40px auto; padding: 0 20px; }
+          .card { background: white; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); padding: 32px; margin-bottom: 24px; }
+          
+          /* Header */
+          .header { text-align: center; margin-bottom: 32px; }
+          .title { font-size: 28px; font-weight: 800; color: #0f172a; margin: 0 0 8px 0; background: linear-gradient(to right, #4f46e5, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+          .subtitle { color: #64748b; font-size: 16px; }
 
-      <div 
-        style={styles.dropZone} 
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (e.dataTransfer.files) handleFileUpload({ target: { files: e.dataTransfer.files } } as any);
-        }}
-      >
-        <p style={{ fontSize: "18px", color: "#7f8c8d" }}>
-          {files.length > 0 
-            ? `${files.length} files selected` 
-            : "Drag & drop Markdown files here, or click to select"}
-        </p>
-        <input 
-          type="file" 
-          multiple 
-          accept=".md,.txt"
-          onChange={handleFileUpload} 
-          style={{ display: files.length > 0 ? "none" : "inline-block", marginTop: "10px" }} 
-        />
-        {files.length > 0 && !processing && (
-          <div style={{ marginTop: "20px" }}>
-             <button style={styles.button} onClick={processFiles}>Start Processing</button>
-             <button style={{...styles.button, backgroundColor: "#95a5a6"}} onClick={() => setFiles([])}>Clear</button>
+          /* Upload */
+          .drop-zone { 
+            border: 2px dashed #cbd5e1; border-radius: 12px; padding: 48px 24px; text-align: center; 
+            transition: all 0.2s ease; background: #f8fafc; cursor: pointer; position: relative;
+          }
+          .drop-zone:hover, .drop-zone.active { border-color: #6366f1; background: #eef2ff; }
+          .drop-input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+          .drop-text { font-size: 16px; color: #475569; margin-top: 16px; font-weight: 500; }
+          .drop-subtext { font-size: 13px; color: #94a3b8; margin-top: 8px; }
+
+          /* File List */
+          .file-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; justify-content: center; }
+          .file-chip { background: #e0e7ff; color: #4338ca; padding: 4px 12px; border-radius: 20px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+
+          /* Buttons */
+          .action-btn { 
+            background: #4f46e5; color: white; border: none; padding: 12px 24px; border-radius: 8px; 
+            font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+          }
+          .action-btn:hover { background: #4338ca; transform: translateY(-1px); }
+          .action-btn:disabled { background: #94a3b8; cursor: not-allowed; transform: none; }
+          .secondary-btn { 
+            background: white; border: 1px solid #cbd5e1; color: #475569; padding: 8px 16px; border-radius: 8px; 
+            font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; justify-content: center;
+          }
+          .secondary-btn:hover { background: #f1f5f9; border-color: #94a3b8; color: #1e293b; }
+
+          /* Progress & Logs */
+          .progress-section { margin-top: 32px; }
+          .progress-bar-bg { height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin: 12px 0; }
+          .progress-bar-fill { height: 100%; background: #10b981; transition: width 0.3s ease; border-radius: 6px; }
+          .progress-info { display: flex; justify-content: space-between; font-size: 14px; color: #475569; font-weight: 500; }
+          
+          .log-window { 
+            background: #1e293b; color: #cbd5e1; padding: 16px; border-radius: 8px; 
+            height: 200px; overflow-y: auto; font-family: 'Menlo', 'Monaco', monospace; font-size: 12px; margin-top: 16px; line-height: 1.6;
+          }
+          .log-window::-webkit-scrollbar { width: 8px; }
+          .log-window::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+          .log-item { border-bottom: 1px solid #334155; padding-bottom: 2px; margin-bottom: 2px; }
+
+          /* Results */
+          .results-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 20px; }
+          .results-title { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0; }
+          
+          .export-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+          .export-card { border: 1px solid #e2e8f0; padding: 16px; border-radius: 8px; background: #fafafa; }
+          .export-card h5 { margin: 0 0 12px 0; font-size: 14px; color: #64748b; font-weight: 600; }
+          
+          .input-group { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+          .num-input { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; width: 80px; text-align: center; font-size: 14px; }
+
+          .code-preview { background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; font-family: 'Menlo', monospace; font-size: 12px; color: #334155; max-height: 300px; }
+       `}</style>
+
+      <div className="card">
+        <div className="header">
+          <h1 className="title">单词本 JSON 生成器</h1>
+          <p className="subtitle">解析 Markdown 词汇表，自动调用 API 填充数据，一键导出。</p>
+        </div>
+
+        <div 
+          className={`drop-zone ${dragActive ? 'active' : ''}`}
+          onDragEnter={() => setDragActive(true)}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={handleFileUpload}
+        >
+          <input 
+            type="file" 
+            multiple 
+            accept=".md,.txt"
+            onChange={handleFileUpload} 
+            className="drop-input"
+          />
+          <Icons.Upload />
+          <p className="drop-text">
+            {files.length > 0 ? "已选择文件" : "点击选择或拖拽 Markdown 文件到这里"}
+          </p>
+          <p className="drop-subtext">支持 .md 或 .txt 格式</p>
+          
+          {files.length > 0 && (
+            <div className="file-list">
+              {files.map((f, i) => (
+                <div key={i} className="file-chip">
+                  <Icons.File /> {f.name}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {files.length > 0 && !processing && !results.length && (
+          <div style={{ textAlign: "center", marginTop: "24px" }}>
+             <button className="action-btn" onClick={processFiles}>
+               开始处理 ({files.length} 个文件)
+             </button>
+             <button 
+                style={{ background: 'transparent', color: '#64748b', border: 'none', marginLeft: '16px', cursor: 'pointer', textDecoration: 'underline' }} 
+                onClick={() => setFiles([])}
+             >
+               清空选择
+             </button>
+          </div>
+        )}
+
+        {(processing || results.length > 0) && (
+          <div className="progress-section">
+            <div className="progress-info">
+              <span>当前处理: {progress.currentWord || (processing ? "准备中..." : "完成")}</span>
+              <span>{percent}% ({progress.current}/{progress.total})</span>
+            </div>
+            <div className="progress-bar-bg">
+              <div className="progress-bar-fill" style={{ width: `${percent}%` }}></div>
+            </div>
+            
+            <div className="log-window">
+              {logs.map((log, idx) => (
+                <div key={idx} className="log-item"> &gt; {log}</div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
           </div>
         )}
       </div>
 
-      {(processing || results.length > 0) && (
-        <div style={styles.progressContainer}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Processing: {progress.currentWord}</span>
-            <span>{progress.current} / {progress.total}</span>
-          </div>
-          <div style={styles.progressBar}>
-            <div style={styles.progressFill(percent) as React.CSSProperties}></div>
-          </div>
-          
-          <div style={styles.logArea}>
-            {logs.map((log, idx) => (
-              <div key={idx}>{log}</div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {results.length > 0 && !processing && (
-        <div style={styles.previewArea}>
-          <h3>Results Preview</h3>
-          <p>Successfully processed {results.length} files.</p>
+        <div className="card">
+          <div className="results-header">
+            <h3 className="results-title">处理结果与导出</h3>
+            <span style={{ color: '#10b981', fontWeight: 500, fontSize: '14px' }}>
+              ✓ 成功处理 {results.length} 个文件
+            </span>
+          </div>
           
-          <div style={styles.exportSection}>
-             <button style={styles.secondaryButton} onClick={handleExportOriginal}>
-               Export Individual Files ({results.length})
-             </button>
-             <button style={styles.secondaryButton} onClick={handleExportMerged}>
-               Export Merged (Single JSON)
-             </button>
-             <div style={{ display: "flex", alignItems: "center", border: "1px solid #ddd", padding: "5px", borderRadius: "4px" }}>
-               <span>Split by quantity: </span>
-               <input 
-                 type="number" 
-                 value={splitCount} 
-                 onChange={(e) => setSplitCount(Number(e.target.value))} 
-                 style={{...styles.input, marginLeft: "10px"}} 
-               />
-               <button style={{...styles.secondaryButton, margin: 0}} onClick={handleExportByQuantity}>
-                 Export Batches
+          <div className="export-grid">
+             {/* Original Export */}
+             <div className="export-card">
+               <h5>保持原文件结构</h5>
+               <button className="secondary-btn" style={{width: '100%'}} onClick={handleExportOriginal}>
+                 <Icons.Download /> 导出独立文件
+               </button>
+             </div>
+
+             {/* Merged Export */}
+             <div className="export-card">
+               <h5>合并所有数据</h5>
+               <button className="secondary-btn" style={{width: '100%'}} onClick={handleExportMerged}>
+                 <Icons.Merge /> 导出合并文件 (1个JSON)
+               </button>
+             </div>
+
+             {/* Batch Export */}
+             <div className="export-card">
+               <h5>按数量分批导出</h5>
+               <div className="input-group">
+                 <input 
+                   type="number" 
+                   value={splitCount} 
+                   onChange={(e) => setSplitCount(Number(e.target.value))} 
+                   className="num-input"
+                 />
+                 <span style={{fontSize: '13px', color: '#64748b'}}>个单词/组</span>
+               </div>
+               <button className="secondary-btn" style={{width: '100%'}} onClick={handleExportByQuantity}>
+                 <Icons.Download /> 批量导出
                </button>
              </div>
           </div>
 
-          <div style={{ marginTop: "20px" }}>
-            <h4>JSON Sample (First 2 items of first file):</h4>
-            <pre style={styles.codeBlock}>
+          <div>
+            <h5 style={{ margin: '0 0 12px 0', color: '#64748b' }}>JSON 数据预览 (首个文件前2项)</h5>
+            <pre className="code-preview">
               {results[0] && JSON.stringify(results[0].data.slice(0, 2), null, 2)}
             </pre>
+          </div>
+          
+          <div style={{textAlign: 'center', marginTop: '32px'}}>
+             <button className="action-btn" style={{background: '#64748b'}} onClick={() => {
+                setFiles([]);
+                setResults([]);
+                setLogs([]);
+                setProgress({ current: 0, total: 0, currentWord: "" });
+             }}>
+               开始新的任务
+             </button>
           </div>
         </div>
       )}
