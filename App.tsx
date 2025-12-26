@@ -17,8 +17,8 @@ interface ProcessedWord {
   phoneticUs: string;
   phoneticUk: string;
   partOfSpeech: string;
-  inflections: string;
-  tags: string;
+  inflections: string[]; // Changed to array
+  tags: string[];        // Changed to array
   cocaRank: string;
   image: string;
   video: {
@@ -91,6 +91,22 @@ const fetchWordData = async (word: string): Promise<any> => {
   } catch (error) {
     console.error(`Failed to fetch ${word}`, error);
     return null;
+  }
+};
+
+const formatTranslation = (raw: string): string => {
+  if (!raw) return "";
+  try {
+    // Attempt to parse ["trans1", "trans2"] format
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Join multiple translations with a separator, or return single
+      return parsed.join('；'); 
+    }
+    return String(parsed);
+  } catch (e) {
+    // Fallback if not valid JSON: remove brackets and quotes
+    return raw.replace(/^\[|\]$/g, '').replace(/"/g, '').trim();
   }
 };
 
@@ -173,13 +189,14 @@ const App = () => {
            definitionLoop.forEach(def => {
              const processed: ProcessedWord = {
                text: entry.word,
-               translation: def.trans.replace(/^"|"$/g, ''),
+               translation: formatTranslation(def.trans),
                partOfSpeech: def.pos,
                cocaRank: entry.rank,
                phoneticUs: getDeep(apiData, "ec.word[0].usphone"),
                phoneticUk: getDeep(apiData, "ec.word[0].ukphone"),
-               inflections: JSON.stringify(getDeep(apiData, "collins_primary.words.indexforms", [])),
-               tags: JSON.stringify(getDeep(apiData, "ec.exam_type", [])),
+               // Removed JSON.stringify to return actual arrays
+               inflections: getDeep(apiData, "collins_primary.words.indexforms", []) || [], 
+               tags: getDeep(apiData, "ec.exam_type", []) || [],
                image: getDeep(apiData, "pic_dict.pic[0].image"),
                video: {
                  cover: getDeep(apiData, "word_video.word_videos[0].video.cover"),
