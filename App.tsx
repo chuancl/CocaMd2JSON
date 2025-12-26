@@ -19,7 +19,7 @@ interface ProcessedWord {
   partOfSpeech: string;
   inflections: string[]; // Changed to array
   tags: string[];        // Changed to array
-  cocaRank: string;
+  cocaRank: number;      // Changed to number
   image: string;
   video: {
     cover: string;
@@ -191,7 +191,7 @@ const App = () => {
                text: entry.word,
                translation: formatTranslation(def.trans),
                partOfSpeech: def.pos,
-               cocaRank: entry.rank,
+               cocaRank: Number(entry.rank), // Converted to number
                phoneticUs: getDeep(apiData, "ec.word[0].usphone"),
                phoneticUk: getDeep(apiData, "ec.word[0].ukphone"),
                // Removed JSON.stringify to return actual arrays
